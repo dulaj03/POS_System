@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PUB CINNAMON | POS System</title>
+    <meta name="description" content="Browser-based POS system for Pub Cinnamon">
+
+    <!-- Libraries -->
+    <script src="https://resource.trickle.so/vendor_lib/unpkg/react@18/umd/react.production.min.js"></script>
+    <script src="https://resource.trickle.so/vendor_lib/unpkg/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://resource.trickle.so/vendor_lib/unpkg/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <link href="https://resource.trickle.so/vendor_lib/unpkg/lucide-static@0.516.0/font/lucide.css" rel="stylesheet">
+
+    <script>
+        // Initialize Chart.js to avoid conflicts
+        const ChartJS = window.Chart;
+
+        // Tailwind Config for Dark Mode
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6', // blue-500
+                        secondary: '#10b981', // emerald-500
+                        dark: {
+                            bg: '#111827', // gray-900
+                            surface: '#1f2937', // gray-800
+                            border: '#374151', // gray-700
+                        },
+                        light: {
+                            bg: '#f9fafb', // gray-50
+                            surface: '#ffffff', // white
+                            border: '#e5e7eb', // gray-200
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style type="text/tailwindcss">
+        @layer theme {
+        :root {
+            --primary-color: #3b82f6;
+            --bg-color: #f9fafb;
+            --text-color: #1f2937;
+            --surface-color: #ffffff;
+            --border-color: #e5e7eb;
+        }
+        .dark {
+            --bg-color: #111827;
+            --text-color: #f3f4f6;
+            --surface-color: #1f2937;
+            --border-color: #374151;
+        }
+    }
+
+    @layer base {
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s, color 0.3s;
+        }
+    }
+
+    @layer utilities {
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    }
+    
+    /* Receipt Printing Logic */
+    #receipt-template { display: none; }
+    
+    @media print {
+        @page {
+            margin: 0;
+            size: 80mm auto;
+        }
+
+        body { margin: 0; padding: 0; }
+        
+        /* Hide everything when printing receipt */
+        body.printing-receipt * { visibility: hidden; }
+        body.printing-receipt #receipt-template,
+        body.printing-receipt #receipt-template * { visibility: visible; }
+        
+        /* Show receipt template */
+        #receipt-template { 
+            display: block !important; 
+            position: absolute; 
+            left: 0; 
+            top: 0; 
+            width: 80mm; 
+            padding: 4mm;
+            font-family: 'Courier New', monospace; 
+            color: #000; 
+            font-size: 10pt;
+            background: white;
+            margin: 0;
+        }
+    }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <!-- App Entry -->
+    <script type="text/babel" src="utils/api.js"></script>
+    <script type="text/babel" src="utils/storage.js"></script>
+    <script type="text/babel" src="utils/helpers.js"></script>
+    <script type="text/babel" src="components/ui/Button.js"></script>
+    <script type="text/babel" src="components/ui/Card.js"></script>
+    <script type="text/babel" src="components/ui/Modal.js"></script>
+    <script type="text/babel" src="components/ui/PINModal.js"></script>
+    <script type="text/babel" src="components/Dashboard.js"></script>
+    <script type="text/babel" src="components/POS.js"></script>
+    <script type="text/babel" src="components/Inventory.js"></script>
+    <script type="text/babel" src="components/Suppliers.js"></script>
+    <script type="text/babel" src="components/Reports.js"></script>
+    <script type="text/babel" src="components/Promotions.js"></script>
+    <script type="text/babel" src="components/Users.js"></script>
+    <script type="text/babel" src="components/Layout.js"></script>
+    <script type="text/babel" src="app.js"></script>
+</body>
+
+</html>
