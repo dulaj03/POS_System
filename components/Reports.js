@@ -1105,7 +1105,14 @@ function Reports() {
                                                         max="100"
                                                         step="0.1"
                                                         value={commissionPercentage}
-                                                        onChange={(e) => setCommissionPercentage(parseFloat(e.target.value) || 0)}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            if (val === '' || val === '-') {
+                                                                setCommissionPercentage(0);
+                                                            } else {
+                                                                setCommissionPercentage(parseFloat(val) || 0);
+                                                            }
+                                                        }}
                                                         onFocus={(e) => e.target.select()}
                                                         className="w-full px-3 py-2 bg-[var(--bg-color)] border border-[var(--border-color)] rounded text-sm text-[var(--text-color)] outline-none focus:border-amber-300"
                                                         placeholder="Enter percentage"
@@ -1169,24 +1176,44 @@ function Reports() {
             </Modal>
 
             <Card>
-                <h3 className="font-bold mb-4 text-[var(--text-color)]">Quick Stats ({dateRange.start} to {dateRange.end})</h3>
+                <h3 className="font-bold mb-4 text-[var(--text-color)]">Quick Stats - Daily Sales ({dateRange.start} to {dateRange.end})</h3>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                         <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500 font-medium">
                             <tr>
                                 <th className="p-3">Date</th>
                                 <th className="p-3 text-right">Transactions</th>
-                                <th className="p-3 text-right">Revenue</th>
+                                <th className="p-3 text-right">Total Revenue</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-[var(--border-color)]">
-                            {getFilteredSales().slice(0, 5).map(s => (
-                                <tr key={s.id} className="hover:bg-[var(--bg-color)]">
-                                    <td className="p-3 text-[var(--text-color)]">{new Date(s.date).toLocaleDateString()}</td>
-                                    <td className="p-3 text-right text-[var(--text-color)]">{s.id}</td>
-                                    <td className="p-3 text-right font-bold text-[var(--text-color)]">{formatCurrency(s.total)}</td>
-                                </tr>
-                            ))}
+                            {(() => {
+                                const dailyStats = {};
+                                getFilteredSales().forEach(s => {
+                                    const dateKey = new Date(s.date).toLocaleDateString();
+                                    if (!dailyStats[dateKey]) {
+                                        dailyStats[dateKey] = {
+                                            date: dateKey,
+                                            transactions: 0,
+                                            revenue: 0
+                                        };
+                                    }
+                                    dailyStats[dateKey].transactions++;
+                                    dailyStats[dateKey].revenue += s.total;
+                                });
+
+                                // Sort by date descending and take top 10 days
+                                return Object.values(dailyStats)
+                                    .sort((a, b) => new Date(b.date) - new Date(a.date))
+                                    .slice(0, 10)
+                                    .map((day, idx) => (
+                                        <tr key={`${day.date}-${idx}`} className="hover:bg-[var(--bg-color)]">
+                                            <td className="p-3 text-[var(--text-color)]">{day.date}</td>
+                                            <td className="p-3 text-right text-[var(--text-color)]">{day.transactions}</td>
+                                            <td className="p-3 text-right font-bold text-[var(--text-color)]">{formatCurrency(day.revenue)}</td>
+                                        </tr>
+                                    ));
+                            })()}
                         </tbody>
                     </table>
                 </div>

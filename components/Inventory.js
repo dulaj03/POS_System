@@ -1,4 +1,4 @@
-function Inventory({ onInventoryUpdated }) {
+function Inventory({ onInventoryUpdated, lastSaleTime }) {
     const [activeTab, setActiveTab] = React.useState('products');
     const [products, setProducts] = React.useState([]);
     const [emptyStock, setEmptyStock] = React.useState({ totalInHand: 0, history: [] });
@@ -22,14 +22,33 @@ function Inventory({ onInventoryUpdated }) {
         refreshData();
     }, []);
 
+    // Refresh empty bottles when a sale is completed
+    React.useEffect(() => {
+        if (lastSaleTime) {
+            console.log('[Inventory] Sale completed, refreshing empty bottles data...');
+            refreshEmptyBottles();
+        }
+    }, [lastSaleTime]);
+
     const refreshData = async () => {
         try {
             const prods = await Storage.getProducts();
             const bottles = await Storage.getEmptyBottles();
             setProducts(prods);
             setEmptyStock(bottles);
+            console.log('[Inventory] Data refreshed. Empty bottles in hand:', bottles.totalInHand);
         } catch (error) {
             console.error('Error loading inventory data:', error);
+        }
+    };
+
+    const refreshEmptyBottles = async () => {
+        try {
+            const bottles = await Storage.getEmptyBottles();
+            setEmptyStock(bottles);
+            console.log('[Inventory] Empty bottles refreshed after sale. Total in hand:', bottles.totalInHand);
+        } catch (error) {
+            console.error('Error refreshing empty bottles:', error);
         }
     };
 
@@ -43,6 +62,20 @@ function Inventory({ onInventoryUpdated }) {
         const cost = parseFloat(e.target.cost.value);
         if (qty > 0) {
             await Storage.updateEmptyBottles('PURCHASE', qty, cost);
+            e.target.reset();
+            await refreshData();
+        }
+    };
+
+    const handleOutBottles = async (e) => {
+        e.preventDefault();
+        const qty = parseInt(e.target.outQty.value);
+        if (qty > 0) {
+            if (qty > emptyStock.totalInHand) {
+                alert('Cannot out more bottles than currently in hand!');
+                return;
+            }
+            await Storage.updateEmptyBottles('OUT', qty);
             e.target.reset();
             await refreshData();
         }
@@ -260,68 +293,84 @@ function Inventory({ onInventoryUpdated }) {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <Card className="lg:col-span-1 h-fit">
-                        <h3 className="font-bold text-lg mb-4 text-[var(--text-color)]">Purchase Empties</h3>
-                        <form onSubmit={handlePurchaseEmpty} className="space-y-4">
-                            <div>
-                                <label className="block text-sm text-gray-500 mb-1">Quantity</label>
-                                <input name="qty" type="number" required className="w-full p-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-color)] text-[var(--text-color)]" />
-                            </div>
-                            <div>
-                                <label className="block text-sm text-gray-500 mb-1">Total Cost (LKR)</label>
-                                <input name="cost" type="number" required className="w-full p-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-color)] text-[var(--text-color)]" />
-                            </div>
-                            <Button className="w-full">Record Purchase</Button>
-                        </form>
-                    </Card>
+                    <div className="lg:col-span-1 space-y-6">
+                        <Card className="h-fit">
+                            <h3 className="font-bold text-lg mb-4 text-[var(--text-color)]">Purchase Empties</h3>
+                            <form onSubmit={handlePurchaseEmpty} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm text-gray-500 mb-1">Quantity</label>
+                                    <input name="qty" type="number" min="1" required className="w-full p-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-color)] text-[var(--text-color)]" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm text-gray-500 mb-1">Total Cost (LKR)</label>
+                                    <input name="cost" type="number" min="0" step="0.01" required className="w-full p-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-color)] text-[var(--text-color)]" />
+                                </div>
+                                <Button className="w-full">Record Purchase</Button>
+                            </form>
+                        </Card>
 
-                    <div className="lg:col-span-2 space-y-6">
-                        <div className="grid grid-cols-2 gap-4">
-                            <Card className="bg-emerald-500/10 border-emerald-500/20">
-                                <p className="text-emerald-600 dark:text-emerald-400 font-medium">Total Empty Bottles In Hand</p>
-                                <h2 className="text-4xl font-bold text-emerald-700 dark:text-emerald-300 mt-2">{emptyStock.totalInHand}</h2>
-                            </Card>
-                            <Card className="bg-blue-500/10 border-blue-500/20">
-                                <p className="text-blue-600 dark:text-blue-400 font-medium">Last Purchase Rate</p>
-                                <h2 className="text-4xl font-bold text-blue-700 dark:text-blue-300 mt-2">
+                        <Card className="h-fit">
+                            <h3 className="font-bold text-lg mb-4 text-[var(--text-color)]">Out Bottles</h3>
+                            <form onSubmit={handleOutBottles} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm text-gray-500 mb-1">Quantity to Out</label>
+                                    <input name="outQty" type="number" min="1" max={emptyStock.totalInHand} required className="w-full p-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-color)] text-[var(--text-color)]" />
+                                    <p className="text-xs text-gray-400 mt-1">Available: {emptyStock.totalInHand} bottles</p>
+                                </div>
+                                <Button className="w-full">Out Bottles</Button>
+                            </form>
+                        </Card>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <Card className="bg-emerald-500/10 border-emerald-500/20 flex flex-col justify-between">
+                            <p className="text-emerald-600 dark:text-emerald-400 font-medium text-sm">Total Empty Bottles In Hand</p>
+                            <h2 className="text-3xl font-bold text-emerald-700 dark:text-emerald-300 mt-2">{emptyStock.totalInHand}</h2>
+                        </Card>
+                        <Card className="bg-blue-500/10 border-blue-500/20 flex flex-col justify-between">
+                            <p className="text-blue-600 dark:text-blue-400 font-medium text-sm">Last Purchase Rate</p>
+                            <div className="mt-2">
+                                <h2 className="text-1.5xl font-bold text-blue-700 dark:text-blue-300 break-words">
                                     {emptyStock.history.length > 0
-                                        ? formatCurrency(emptyStock.history[emptyStock.history.length - 1].cost / emptyStock.history[emptyStock.history.length - 1].quantity)
+                                        ? formatCurrency(emptyStock.history.find(h => h.type === 'PURCHASE')?.cost / emptyStock.history.find(h => h.type === 'PURCHASE')?.quantity || emptyStock.history[emptyStock.history.length - 1].cost / emptyStock.history[emptyStock.history.length - 1].quantity)
                                         : 'N/A'
-                                    } <span className="text-base font-normal opacity-70">/ bottle</span>
+                                    }
                                 </h2>
-                            </Card>
-                        </div>
-
-                        <Card>
-                            <h3 className="font-bold mb-4 text-[var(--text-color)]">Empty Bottle History</h3>
-                            <div className="overflow-x-auto max-h-60 overflow-y-auto">
-                                <table className="w-full text-left">
-                                    <thead className="text-gray-500 text-sm sticky top-0 bg-[var(--surface-color)]">
-                                        <tr>
-                                            <th className="p-2">Date</th>
-                                            <th className="p-2">Type</th>
-                                            <th className="p-2 text-right">Qty</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="text-sm">
-                                        {[...emptyStock.history].reverse().map(h => (
-                                            <tr key={h.id} className="border-t border-[var(--border-color)]">
-                                                <td className="p-2 text-[var(--text-color)]">{formatDate(h.date)}</td>
-                                                <td className="p-2">
-                                                    <span className={`text-xs px-2 py-1 rounded-full ${h.type === 'PURCHASE' ? 'bg-blue-100 text-blue-700' :
-                                                        h.type === 'EXCHANGE' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
-                                                        }`}>
-                                                        {h.type}
-                                                    </span>
-                                                </td>
-                                                <td className="p-2 text-right font-medium text-[var(--text-color)]">{h.quantity}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                <p className="text-xs font-normal opacity-70 text-blue-600 dark:text-blue-400">/ bottle</p>
                             </div>
                         </Card>
                     </div>
+
+                    <Card className="flex flex-col max-h-96">
+                        <h3 className="font-bold mb-4 text-[var(--text-color)]">Empty Bottle History</h3>
+                        <div className="flex-1 overflow-x-auto overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-900 dark:scrollbar-thumb-gray-500 dark:scrollbar-track-gray-800">
+                            <table className="w-full text-left">
+                                <thead className="text-gray-500 text-sm sticky top-0 bg-[var(--surface-color)]">
+                                    <tr>
+                                        <th className="p-2">Date</th>
+                                        <th className="p-2">Type</th>
+                                        <th className="p-2 text-right">Qty</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="text-sm">
+                                    {[...emptyStock.history].reverse().map(h => (
+                                        <tr key={h.id} className="border-t border-[var(--border-color)]">
+                                            <td className="p-2 text-[var(--text-color)]">{formatDate(h.date)}</td>
+                                            <td className="p-2">
+                                                <span className={`text-xs px-2 py-1 rounded-full ${h.type === 'PURCHASE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' :
+                                                    h.type === 'EXCHANGE' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-200' :
+                                                        h.type === 'OUT' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200' :
+                                                            'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
+                                                    }`}>
+                                                    {h.type}
+                                                </span>
+                                            </td>
+                                            <td className="p-2 text-right font-medium text-[var(--text-color)]">{h.quantity}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </Card>
                 </div>
             )}
 

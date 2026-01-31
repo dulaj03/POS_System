@@ -1,8 +1,10 @@
 -- PUB CINNAMON POS System Database Schema
 -- Import this into phpMyAdmin for your MySQL database
+-- For localhost: pub_cinnamon
+-- For live: cinntjoz_pub_cinnamon
 
-CREATE DATABASE IF NOT EXISTS pub_cinnamon;
-USE pub_cinnamon;
+CREATE DATABASE IF NOT EXISTS cinntjoz_pub_cinnamon;
+USE cinntjoz_pub_cinnamon;
 
 -- ===== USERS TABLE =====
 CREATE TABLE users (
@@ -116,16 +118,32 @@ CREATE TABLE empty_bottles_summary (
 -- Insert initial summary record
 INSERT INTO empty_bottles_summary (id, total_in_hand) VALUES (1, 0);
 
+-- ===== SUPPLIERS TABLE =====
+CREATE TABLE suppliers (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    contact_person VARCHAR(255),
+    phone VARCHAR(20),
+    email VARCHAR(100),
+    address TEXT,
+    is_deleted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_name (name)
+) ENGINE=InnoDB;
+
 -- ===== SUPPLIER PAYMENTS TABLE =====
 CREATE TABLE supplier_payments (
     id BIGINT PRIMARY KEY,
-    supplier VARCHAR(255) NOT NULL,
+    supplier_id VARCHAR(50) NOT NULL,
     amount DECIMAL(10, 2) NOT NULL,
     date DATE NOT NULL,
     description TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
     INDEX idx_date (date),
-    INDEX idx_supplier (supplier)
+    INDEX idx_supplier_id (supplier_id),
+    INDEX idx_supplier_date (supplier_id, date)
 ) ENGINE=InnoDB;
 
 -- ===== SYSTEM SETTINGS TABLE =====

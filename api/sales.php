@@ -145,6 +145,8 @@ elseif ($method === 'POST' && $request === 'add') {
         // Add sale items and update inventory
         $stmt = $conn->prepare("INSERT INTO sale_items (sale_id, product_id, name, price, cost_price, qty, discount) VALUES (?, ?, ?, ?, ?, ?, ?)");
         
+        $totalEmptyBottlesFromPartial = 0;
+        
         foreach ($items as $item) {
             $productId = $item['id'];
             $itemName = $item['name'];
@@ -160,16 +162,46 @@ elseif ($method === 'POST' && $request === 'add') {
             $updateStmt = $conn->prepare("UPDATE products SET stock = stock - ? WHERE id = ? AND category != 'Kitchen'");
             $updateStmt->bind_param('is', $qty, $productId);
             $updateStmt->execute();
+            
+            // Track empty bottles from PARTIAL deposits
+            if (isset($item['depositMode']) && $item['depositMode'] === 'PARTIAL') {
+                $emptyBottlesCount = isset($item['emptyBottlesExchanged']) ? (int)$item['emptyBottlesExchanged'] : 0;
+                $totalEmptyBottlesFromPartial += $emptyBottlesCount;
+            }
         }
         
-        // Update empty bottles if exchanged
-        if ($bottlesExchanged > 0) {
+        // Update empty bottles - handle EXCHANGE, PARTIAL, and deposit items
+        // EXCHANGE mode: all qty becomes empty bottles
+        // PARTIAL mode: only emptyBottlesExchanged count becomes empty bottles
+        //   - UNLESS isDepositReturn is true, then no bottles added
+        // CHARGE mode: no empty bottles (customer brings new bottles)
+        
+        // Recalculate total bottles exchanged from items
+        $totalEmptyBottles = 0;
+        foreach ($items as $item) {
+            if (isset($item['depositMode'])) {
+                if ($item['depositMode'] === 'EXCHANGE') {
+                    // Full exchange: all qty are empty bottles
+                    $totalEmptyBottles += (int)$item['qty'];
+                } elseif ($item['depositMode'] === 'PARTIAL') {
+                    // Partial: only empty bottles exchanged count
+                    // UNLESS isDepositReturn is true (deposit return mode), then no bottles
+                    if (!(isset($item['isDepositReturn']) && $item['isDepositReturn'])) {
+                        $totalEmptyBottles += isset($item['emptyBottlesExchanged']) ? (int)$item['emptyBottlesExchanged'] : 0;
+                    }
+                }
+                // CHARGE and other modes don't add empty bottles
+            }
+        }
+        
+        if ($totalEmptyBottles > 0) {
             $exchangeStmt = $conn->prepare("UPDATE empty_bottles_summary SET total_in_hand = total_in_hand + ? WHERE id = 1");
-            $exchangeStmt->bind_param('i', $bottlesExchanged);
+            $exchangeStmt->bind_param('i', $totalEmptyBottles);
             $exchangeStmt->execute();
             
+            // Record as EXCHANGE type (includes both EXCHANGE and PARTIAL mode bottles)
             $historyStmt = $conn->prepare("INSERT INTO empty_bottles (type, quantity, cost) VALUES ('EXCHANGE', ?, 0)");
-            $historyStmt->bind_param('i', $bottlesExchanged);
+            $historyStmt->bind_param('i', $totalEmptyBottles);
             $historyStmt->execute();
         }
         
@@ -183,7 +215,7 @@ elseif ($method === 'POST' && $request === 'add') {
             'tax' => $tax,
             'depositTotal' => $depositTotal,
             'total' => $total,
-            'bottlesExchanged' => $bottlesExchanged,
+            'bottlesExchanged' => $totalEmptyBottles,
             'paymentMethods' => json_decode($paymentMethods, true),
             'date' => $saleDate,
             'items' => $items

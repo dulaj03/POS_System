@@ -78,24 +78,55 @@ elseif ($method === 'POST' && $request === 'set_pos_settings') {
         sendError('Tax rate must be between 0 and 100', 400);
     }
     
+    error_log('[SET_POS_SETTINGS] Updating with values: service_charge_rate=' . $serviceChargeRate . ', tax_rate=' . $taxRate);
+    
+    // Convert to strings for VARCHAR storage
+    $serviceChargeStr = (string)$serviceChargeRate;
+    $taxRateStr = (string)$taxRate;
+    
     // Update service charge rate
     $stmt = $conn->prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES ('service_charge_rate', ?) ON DUPLICATE KEY UPDATE setting_value = ?");
-    $stmt->bind_param('ss', $serviceChargeRate, $serviceChargeRate);
+    if (!$stmt) {
+        error_log('[SET_POS_SETTINGS] Prepare failed for service charge: ' . $conn->error);
+        sendError('Failed to prepare statement for service charge: ' . $conn->error, 500);
+    }
+    $stmt->bind_param('ss', $serviceChargeStr, $serviceChargeStr);
     if (!$stmt->execute()) {
+        error_log('[SET_POS_SETTINGS] Execute failed for service charge: ' . $stmt->error);
         sendError('Failed to save service charge rate: ' . $stmt->error, 500);
     }
+    $stmt->close();
     
     // Update tax rate
     $stmt = $conn->prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES ('tax_rate', ?) ON DUPLICATE KEY UPDATE setting_value = ?");
-    $stmt->bind_param('ss', $taxRate, $taxRate);
+    if (!$stmt) {
+        error_log('[SET_POS_SETTINGS] Prepare failed for tax rate: ' . $conn->error);
+        sendError('Failed to prepare statement for tax rate: ' . $conn->error, 500);
+    }
+    $stmt->bind_param('ss', $taxRateStr, $taxRateStr);
     if (!$stmt->execute()) {
+        error_log('[SET_POS_SETTINGS] Execute failed for tax rate: ' . $stmt->error);
         sendError('Failed to save tax rate: ' . $stmt->error, 500);
     }
+    $stmt->close();
     
-    sendResponse([
-        'service_charge_rate' => $serviceChargeRate,
-        'tax_rate' => $taxRate
-    ]);
+    // Verify the settings were saved by reading them back
+    $result = $conn->query("SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('service_charge_rate', 'tax_rate')");
+    
+    $savedSettings = [
+        'service_charge_rate' => 10,
+        'tax_rate' => 8
+    ];
+    
+    if ($result && $result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $savedSettings[$row['setting_key']] = (float)$row['setting_value'];
+        }
+    }
+    
+    error_log('[SET_POS_SETTINGS] Verified saved values: ' . json_encode($savedSettings));
+    
+    sendResponse($savedSettings);
 }
 
 else {

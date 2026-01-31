@@ -1,7 +1,9 @@
 // API Service Layer for React
 // File: utils/api.js
 
-const API_BASE_URL = 'http://localhost/PUB_Cinnamon/api';
+// Use relative path based on current directory
+// This works on localhost AND cPanel (no hardcoded domains)
+const API_BASE_URL = './api';
 
 // Helper function for API calls
 const apiCall = async (endpoint, method = 'GET', data = null) => {
@@ -105,8 +107,22 @@ const API = {
         apiCall('bottles.php?action=return', 'POST', { quantity }),
 
     // ===== SUPPLIER PAYMENTS =====
-    getSupplierPayments: () => apiCall('suppliers.php?action=all'),
-    addSupplierPayment: (payment) => apiCall('suppliers.php?action=add', 'POST', payment),
+    getSupplierPayments: async () => {
+        const response = await apiCall('suppliers.php?action=all-payments');
+        // Handle new response format: {success: true, data: [...]}
+        if (response.success && Array.isArray(response.data)) {
+            return response.data;
+        }
+        // Handle old response format for backwards compatibility
+        return Array.isArray(response) ? response : [];
+    },
+    addSupplierPayment: async (payment) => {
+        const response = await apiCall('suppliers.php?action=add-payment', 'POST', payment);
+        if (response.success && response.data) {
+            return response.data;
+        }
+        return response;
+    },
 
     // ===== COMMISSIONS =====
     getAllCommissions: () => {

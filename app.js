@@ -139,6 +139,7 @@ function App() {
   const [lastSaleTime, setLastSaleTime] = React.useState(null); // Track when last sale was recorded
   const [inventoryRefreshTime, setInventoryRefreshTime] = React.useState(null); // Track inventory changes
   const [promotionRefreshTime, setPromotionRefreshTime] = React.useState(null); // Track promotion changes
+  const [settingsRefreshTime, setSettingsRefreshTime] = React.useState(null); // Track settings changes
   const [sessionWarning, setSessionWarning] = React.useState(false); // Show session expiration warning
   const timeoutRef = React.useRef(null); // Ref to store timeout ID
 
@@ -168,6 +169,8 @@ function App() {
     if (currentUser) {
       timeoutRef.current = setTimeout(() => {
         console.log('[Session] Session timeout - logging out');
+        // Clear all POS carts on session timeout for security
+        Storage.clearAllPOSCarts();
         setSessionWarning(true);
         setCurrentUser(null);
         sessionStorage.removeItem('currentUser');
@@ -212,6 +215,8 @@ function App() {
   };
 
   const handleLogout = () => {
+    // Clear all POS carts on logout for security
+    Storage.clearAllPOSCarts();
     setCurrentUser(null);
     sessionStorage.removeItem('currentUser');
     if (timeoutRef.current) {
@@ -235,11 +240,16 @@ function App() {
     setPromotionRefreshTime(Date.now());
   };
 
+  const handleSettingsUpdated = () => {
+    // Update timestamp to trigger POS to reload settings
+    setSettingsRefreshTime(Date.now());
+  };
+
   const renderView = () => {
     switch (currentView) {
       case 'dashboard': return <Dashboard onViewChange={setCurrentView} lastSaleTime={lastSaleTime} currentUser={currentUser} />;
-      case 'pos': return <POS onSaleCompleted={handleSaleCompleted} currentUser={currentUser} refreshTime={inventoryRefreshTime} promotionRefreshTime={promotionRefreshTime} />;
-      case 'inventory': return <Inventory onInventoryUpdated={handleInventoryUpdated} />;
+      case 'pos': return <POS onSaleCompleted={handleSaleCompleted} currentUser={currentUser} refreshTime={inventoryRefreshTime} promotionRefreshTime={promotionRefreshTime} settingsRefreshTime={settingsRefreshTime} />;
+      case 'inventory': return <Inventory onInventoryUpdated={handleInventoryUpdated} lastSaleTime={lastSaleTime} />;
       case 'suppliers': return <Suppliers />;
       case 'reports': return <Reports />;
       case 'promotions': return <Promotions onPromotionsUpdated={handlePromotionsUpdated} />;

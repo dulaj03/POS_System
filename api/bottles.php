@@ -63,8 +63,8 @@ elseif ($method === 'POST' && $request === 'purchase') {
     }
 }
 
-elseif ($method === 'POST' && $request === 'return') {
-    // Return bottles to supplier
+elseif ($method === 'POST' && ($request === 'return' || $request === 'out')) {
+    // Return/Out bottles (decrement from total)
     $data = json_decode(file_get_contents('php://input'), true);
     
     if (!isset($data['quantity'])) {
@@ -72,6 +72,7 @@ elseif ($method === 'POST' && $request === 'return') {
     }
     
     $quantity = (int)$data['quantity'];
+    $typeRecord = ($request === 'out') ? 'OUT' : 'RETURN_TO_SUPPLIER';
     
     $conn->begin_transaction();
     
@@ -82,16 +83,17 @@ elseif ($method === 'POST' && $request === 'return') {
         $stmt->execute();
         
         // Add to history
-        $stmt = $conn->prepare("INSERT INTO empty_bottles (type, quantity, cost) VALUES ('RETURN_TO_SUPPLIER', ?, 0)");
-        $stmt->bind_param('i', $quantity);
+        $stmt = $conn->prepare("INSERT INTO empty_bottles (type, quantity, cost) VALUES (?, ?, 0)");
+        $stmt->bind_param('si', $typeRecord, $quantity);
         $stmt->execute();
         
         $conn->commit();
         
-        sendResponse(['message' => 'Bottles returned', 'quantity' => $quantity]);
+        $message = ($request === 'out') ? 'Bottles outed' : 'Bottles returned';
+        sendResponse(['message' => $message, 'quantity' => $quantity]);
     } catch (Exception $e) {
         $conn->rollback();
-        sendError('Failed to return bottles: ' . $e->getMessage(), 500);
+        sendError('Failed to process bottles: ' . $e->getMessage(), 500);
     }
 }
 

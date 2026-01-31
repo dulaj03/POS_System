@@ -1,0 +1,28 @@
+# PUB Cinnamon POS - Routing Configuration
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /pub_cinnamon_pos/
+    
+    # Allow direct access to api folder
+    RewriteRule ^api/ - [L]
+    
+    # Allow direct access to actual files/folders
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+    
+    # Route all other requests to index.html for React Router
+    RewriteRule ^ index.html [QSA,L]
+</IfModule>
+
+# Enable CORS headers
+<IfModule mod_headers.c>
+    Header set Access-Control-Allow-Origin "*"
+    Header set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    Header set Access-Control-Allow-Headers "Content-Type, Authorization"
+</IfModule>
+
+# Compress responses
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+</IfModule>

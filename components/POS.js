@@ -1,4 +1,4 @@
-function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }) {
+function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime, settingsRefreshTime }) {
     const [products, setProducts] = React.useState([]);
     const [promotions, setPromotions] = React.useState([]);
     const [cart, setCart] = React.useState([]);
@@ -17,23 +17,50 @@ function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }
     const [serviceChargeRate, setServiceChargeRate] = React.useState(10);
     const [taxRate, setTaxRate] = React.useState(8);
 
+    // Effect to restore saved cart on component mount
+    React.useEffect(() => {
+        if (!currentUser?.id) return;
+
+        const savedCartData = Storage.loadPOSCart(currentUser.id);
+        if (savedCartData && savedCartData.cart && Array.isArray(savedCartData.cart) && savedCartData.cart.length > 0) {
+            setCart(savedCartData.cart);
+            setRemovedPromos(savedCartData.removedPromos || {});
+            setPayments(savedCartData.payments || [{ id: 1, method: 'Cash', amount: '' }]);
+            // NOTE: Do NOT restore service charge/tax from saved cart - always load fresh from database
+            console.log('[POS] Restored cart for user', currentUser.id, 'with', savedCartData.cart.length, 'items');
+            console.log('[POS] Skipping restoration of service charge/tax - will load from database');
+        } else {
+            console.log('[POS] No valid saved cart for user', currentUser.id);
+        }
+    }, [currentUser?.id]); // Only run on mount or when user changes
+
     React.useEffect(() => {
         const loadData = async () => {
             try {
+                console.log('[POS.loadData] Starting to load products, promotions, and settings...');
                 const prods = await Storage.getProducts();
                 const promos = await Storage.getPromotions();
                 const settings = await Storage.getPOSSettings();
 
+                console.log('[POS.loadData] Loaded settings from database:', settings);
                 setProducts(prods);
                 setPromotions(promos);
-                setServiceChargeRate(settings.service_charge_rate || 10);
-                setTaxRate(settings.tax_rate || 8);
+                setServiceChargeRate(prevRate => {
+                    const newRate = settings.service_charge_rate ?? prevRate;
+                    console.log('[POS.loadData] Updating serviceChargeRate from', prevRate, 'to', newRate);
+                    return newRate;
+                });
+                setTaxRate(prevRate => {
+                    const newRate = settings.tax_rate ?? prevRate;
+                    console.log('[POS.loadData] Updating taxRate from', prevRate, 'to', newRate);
+                    return newRate;
+                });
             } catch (error) {
                 console.error('Error loading POS data:', error);
             }
         };
         loadData();
-    }, [refreshTime, promotionRefreshTime]); // Re-load when inventory or promotions are updated
+    }, [refreshTime, promotionRefreshTime, settingsRefreshTime]); // Re-load when inventory, promotions, or settings are updated
 
     // Print Effect: Triggers when receiptData is updated
     React.useEffect(() => {
@@ -67,6 +94,33 @@ function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }
             return () => clearTimeout(timer);
         }
     }, [notification]);
+
+    // Save cart to sessionStorage whenever it changes (except empty carts)
+    React.useEffect(() => {
+        if (cart.length > 0 && currentUser?.id) {
+            Storage.savePOSCart(cart, removedPromos, payments, serviceChargeRate, taxRate, currentUser.id);
+        }
+    }, [cart, removedPromos, payments, serviceChargeRate, taxRate, currentUser?.id]);
+
+    // Additional safety: Save cart on beforeunload (when tab is being closed/switched)
+    React.useEffect(() => {
+        const handleBeforeUnload = () => {
+            if (cart.length > 0 && currentUser?.id) {
+                Storage.savePOSCart(cart, removedPromos, payments, serviceChargeRate, taxRate, currentUser.id);
+            }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [cart, removedPromos, payments, serviceChargeRate, taxRate, currentUser?.id]);
+
+    // Clear cart from storage if it becomes empty
+    React.useEffect(() => {
+        if (cart.length === 0 && currentUser?.id) {
+            Storage.clearPOSCart(currentUser.id);
+            console.log('[POS] Cart is empty, cleared storage for user', currentUser.id);
+        }
+    }, [cart.length, currentUser?.id]);
 
     const showNotification = (message, type = 'info') => {
         setNotification({ message, type });
@@ -110,6 +164,7 @@ function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }
                     cartId,
                     qty: 1,
                     depositMode: 'CHARGE',
+                    emptyBottlesExchanged: 0,
                     costPrice: product.costPrice || 0,
                     appliedPromo: promo
                 }]);
@@ -135,22 +190,65 @@ function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }
     };
 
     const removeFromCart = (cartId) => {
-        setCart(cart.filter(item => item.cartId !== cartId));
+        // Create the new cart immediately and save it
+        const updatedCart = cart.filter(item => item.cartId !== cartId);
+        setCart(updatedCart);
+
+        // Update removed promos
         const newRemoved = { ...removedPromos };
         delete newRemoved[cartId];
         setRemovedPromos(newRemoved);
+
+        // Save immediately to prevent loss on tab switch
+        if (updatedCart.length > 0 && currentUser?.id) {
+            Storage.savePOSCart(updatedCart, newRemoved, payments, serviceChargeRate, taxRate, currentUser.id);
+        } else if (updatedCart.length === 0) {
+            // If cart becomes empty after deletion, clear it
+            Storage.clearPOSCart(currentUser?.id);
+        }
     };
 
     const toggleDepositMode = (cartId) => {
         setCart(cart.map(item => {
             if (item.cartId === cartId && item.isDepositEnabled) {
+                // Cycle through: CHARGE -> PARTIAL -> EXCHANGE -> CHARGE
+                let nextMode = 'CHARGE';
+                if (item.depositMode === 'CHARGE') {
+                    nextMode = 'PARTIAL';
+                } else if (item.depositMode === 'PARTIAL') {
+                    nextMode = 'EXCHANGE';
+                } else if (item.depositMode === 'EXCHANGE') {
+                    nextMode = 'CHARGE';
+                }
                 return {
                     ...item,
-                    depositMode: item.depositMode === 'CHARGE' ? 'EXCHANGE' : 'CHARGE'
+                    depositMode: nextMode
                 };
             }
             return item;
         }));
+    };
+
+    const toggleDepositReturn = (cartId) => {
+        setCart(cart.map(item => {
+            if (item.cartId === cartId && item.isDepositEnabled && item.depositMode === 'PARTIAL') {
+                // Toggle between PARTIAL normal and PARTIAL with DepRe
+                // DepRe = Deposit Return (no deposit charge, no bottles added)
+                return {
+                    ...item,
+                    isDepositReturn: !item.isDepositReturn
+                };
+            }
+            return item;
+        }));
+    };
+
+    const updateEmptyBottlesExchanged = (cartId, count) => {
+        setCart(cart.map(item =>
+            item.cartId === cartId
+                ? { ...item, emptyBottlesExchanged: Math.max(0, count) }
+                : item
+        ));
     };
 
     const togglePromoForLine = (cartId) => {
@@ -163,10 +261,41 @@ function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }
     // Handler to save POS settings (admin only)
     const updatePOSSettings = async (newServiceCharge, newTax) => {
         try {
-            await Storage.setPOSSettings(newServiceCharge, newTax);
-            setServiceChargeRate(newServiceCharge);
-            setTaxRate(newTax);
+            console.log('[POS] updatePOSSettings called with:', { newServiceCharge, newTax });
+
+            // Save settings and get response
+            const saveResponse = await Storage.setPOSSettings(newServiceCharge, newTax);
+            console.log('[POS] Save response:', saveResponse);
+
+            // Use the values returned from the save operation (which were verified in PHP)
+            const savedCharge = saveResponse.service_charge_rate ?? newServiceCharge;
+            const savedTax = saveResponse.tax_rate ?? newTax;
+
+            console.log('[POS] Setting state with values from save response:', { savedCharge, savedTax });
+            setServiceChargeRate(savedCharge);
+            setTaxRate(savedTax);
+
             showNotification('POS settings updated successfully', 'success');
+
+            // After a small delay, reload from database to triple-verify persistence
+            setTimeout(async () => {
+                try {
+                    console.log('[POS] Verifying settings from database...');
+                    const verifiedSettings = await Storage.getPOSSettings();
+                    console.log('[POS] Verified settings from database:', verifiedSettings);
+
+                    // Only update if values differ (to detect any reversion)
+                    if (verifiedSettings.service_charge_rate !== savedCharge || verifiedSettings.tax_rate !== savedTax) {
+                        console.warn('[POS] Settings mismatch detected! Expected:', { savedCharge, savedTax }, 'Got:', verifiedSettings);
+                        setServiceChargeRate(verifiedSettings.service_charge_rate ?? savedCharge);
+                        setTaxRate(verifiedSettings.tax_rate ?? savedTax);
+                    } else {
+                        console.log('[POS] Settings verified successfully');
+                    }
+                } catch (verifyError) {
+                    console.error('[POS] Failed to verify settings:', verifyError);
+                }
+            }, 500);
         } catch (error) {
             console.error('Error saving POS settings:', error);
             showNotification('Failed to save POS settings', 'error');
@@ -207,9 +336,26 @@ function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }
         const lineTotalAfterDiscount = lineTotalRaw - discountAmount;
 
         let lineDeposit = 0;
-        if (item.isDepositEnabled && item.depositMode === 'CHARGE') {
-            lineDeposit = item.depositAmount * item.qty;
-            depositTotal += lineDeposit;
+        if (item.isDepositEnabled) {
+            if (item.depositMode === 'CHARGE') {
+                // Full charge: all new bottles are charged deposits
+                lineDeposit = item.depositAmount * item.qty;
+                depositTotal += lineDeposit;
+            } else if (item.depositMode === 'PARTIAL') {
+                // Partial exchange: charge for new bottles, deduct for empty bottles exchanged
+                // UNLESS DepRe (isDepositReturn) is active, then zero deposit
+                if (item.isDepositReturn) {
+                    // Deposit Return mode: no deposit charge
+                    lineDeposit = 0;
+                } else {
+                    const emptyExchanged = item.emptyBottlesExchanged || 0;
+                    const newBottles = item.qty;
+                    // Net deposit = (new bottles × deposit) - (empty bottles × deposit)
+                    lineDeposit = (newBottles * item.depositAmount) - (emptyExchanged * item.depositAmount);
+                    depositTotal += lineDeposit;
+                }
+            }
+            // EXCHANGE mode: lineDeposit stays 0 (full exchange, no charge)
         }
 
         return {
@@ -227,7 +373,22 @@ function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }
     const cartTotal = netTotalAfterDiscount + serviceChargeAmount + taxAmount + depositTotal;
 
     const bottlesExchanged = cart.reduce((sum, item) => {
-        return sum + (item.isDepositEnabled && item.depositMode === 'EXCHANGE' ? item.qty : 0);
+        if (item.isDepositEnabled) {
+            if (item.depositMode === 'EXCHANGE') {
+                // Full exchange: all new bottles are exchanged
+                return sum + item.qty;
+            } else if (item.depositMode === 'PARTIAL') {
+                // Partial exchange: count only empty bottles brought in
+                // UNLESS DepRe is active, then no bottles added
+                if (item.isDepositReturn) {
+                    // Deposit Return mode: no bottles added
+                    return sum;
+                } else {
+                    return sum + (item.emptyBottlesExchanged || 0);
+                }
+            }
+        }
+        return sum;
     }, 0);
 
     // Payment Logic
@@ -267,8 +428,17 @@ function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }
             lineDeposit: item.lineDeposit || 0,
             discountAmount: item.discountAmount || 0,
             isDepositEnabled: item.isDepositEnabled || false,
-            depositMode: item.depositMode || null
+            depositMode: item.depositMode || null,
+            depositAmount: item.depositAmount || 0,
+            emptyBottlesExchanged: item.emptyBottlesExchanged || 0
         }));
+
+        // Log deposit details for debugging
+        console.log('[POS] Processing sale with items:');
+        cleanedItems.forEach((item, idx) => {
+            console.log(`  Item ${idx}: ${item.name}, Mode: ${item.depositMode}, LineDeposit: ${item.lineDeposit}, EmptyBottles: ${item.emptyBottlesExchanged}`);
+        });
+        console.log(`[POS] Total bottles to exchange: ${bottlesExchanged}, Total deposits: ${depositTotal}`);
 
         const totalPaidAmount = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
         const change = Math.max(0, totalPaidAmount - cartTotal);
@@ -307,10 +477,19 @@ function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }
 
         try {
             await Storage.addSale(sale);
+
+            // Update empty bottles inventory if any bottles were exchanged
+            if (bottlesExchanged > 0) {
+                console.log('[POS] Updating empty bottles with:', bottlesExchanged);
+                await Storage.updateEmptyBottles('EXCHANGE', bottlesExchanged);
+            }
+
             setShowPaymentModal(false);
             setCart([]);
             setPayments([{ id: 1, method: 'Cash', amount: '' }]);
             setRemovedPromos({});
+            // Clear saved cart data from sessionStorage after successful payment
+            Storage.clearPOSCart(currentUser?.id);
             // Trigger Print via Effect
             setReceiptData(sale);
 
@@ -460,11 +639,24 @@ function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }
                                     <div className="flex items-center gap-2">
                                         <button
                                             onClick={() => removeFromCart(item.cartId)}
-                                            className="text-red-500 hover:bg-red-50 p-1 rounded"
+                                            className="text-red-500 hover:bg-red-50 p-1 rounded flex items-center justify-center -mt-1"
                                             title="Remove Item"
                                         >
                                             <div className="icon-trash w-3 h-3"></div>
                                         </button>
+
+                                        {item.isDepositEnabled && item.depositMode === 'PARTIAL' && (
+                                            <button
+                                                onClick={() => toggleDepositReturn(item.cartId)}
+                                                className={`text-[10px] px-2 py-0.5 rounded font-medium transition-colors ${item.isDepositReturn
+                                                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                                                    : 'bg-gray-100 text-gray-700 dark:bg-gray-700/30 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700/50'
+                                                    }`}
+                                                title="Deposit Return - No billing impact, no bottles"
+                                            >
+                                                DepRe
+                                            </button>
+                                        )}
 
                                         {item.appliedPromo && (
                                             <button
@@ -481,15 +673,43 @@ function POS({ onSaleCompleted, currentUser, refreshTime, promotionRefreshTime }
                                     </div>
 
                                     {item.isDepositEnabled && (
-                                        <button
-                                            onClick={() => toggleDepositMode(item.cartId)}
-                                            className={`text-[10px] px-2 py-0.5 rounded transition-colors ${item.depositMode === 'CHARGE'
-                                                ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-                                                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                                                }`}
-                                        >
-                                            {item.depositMode === 'CHARGE' ? '+Dep' : 'Exch'}
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => toggleDepositMode(item.cartId)}
+                                                className={`text-[10px] px-2 py-0.5 rounded transition-colors font-medium ${item.depositMode === 'CHARGE'
+                                                    ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                                                    : item.depositMode === 'PARTIAL'
+                                                        ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                                                        : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                                    }`}
+                                            >
+                                                {item.depositMode === 'CHARGE' ? '+Dep' : item.depositMode === 'PARTIAL' ? 'Part' : 'Exch'}
+                                            </button>
+
+                                            {item.depositMode === 'PARTIAL' && (
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max={item.qty}
+                                                    value={item.emptyBottlesExchanged || 0}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        if (val === '' || val === '-') {
+                                                            updateEmptyBottlesExchanged(item.cartId, 0);
+                                                        } else {
+                                                            const parsed = parseInt(val);
+                                                            if (!isNaN(parsed)) {
+                                                                updateEmptyBottlesExchanged(item.cartId, Math.max(0, parsed));
+                                                            }
+                                                        }
+                                                    }}
+                                                    onFocus={(e) => e.target.select()}
+                                                    className="w-10 px-1 py-0.5 text-xs rounded bg-orange-50 dark:bg-orange-900/20 border border-orange-300 text-center outline-none focus:ring-1 focus:ring-orange-500"
+                                                    placeholder="0"
+                                                    title="Number of empty bottles being exchanged"
+                                                />
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             </div>

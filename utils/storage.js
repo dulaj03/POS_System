@@ -160,7 +160,7 @@ const Storage = {
         try {
             if (type === 'PURCHASE') {
                 return await API.purchaseBottles(quantity, cost);
-            } else if (type === 'RETURN_TO_SUPPLIER') {
+            } else if (type === 'RETURN_TO_SUPPLIER' || type === 'OUT') {
                 return await API.returnBottles(quantity);
             }
         } catch (error) {
@@ -349,10 +349,86 @@ const Storage = {
 
     setPOSSettings: async (serviceChargeRate, taxRate) => {
         try {
-            return await API.setPOSSettings(serviceChargeRate, taxRate);
+            console.log('[Storage] Saving POS settings:', { serviceChargeRate, taxRate });
+            const result = await API.setPOSSettings(serviceChargeRate, taxRate);
+            console.log('[Storage] API response after save:', result);
+            return result;
         } catch (error) {
             console.error('Error saving POS settings:', error);
             throw error;
+        }
+    },
+
+    // ===== CART PERSISTENCE =====
+    // Save ongoing bill to sessionStorage so it survives navigation
+    // IMPORTANT: Carts are stored per user to ensure isolation between cashiers
+    savePOSCart: (cart, removedPromos, payments, serviceChargeRate, taxRate, userId) => {
+        try {
+            const cartData = {
+                cart,
+                removedPromos,
+                payments,
+                serviceChargeRate,
+                taxRate,
+                userId,
+                timestamp: Date.now()
+            };
+            const key = `pos_cart_data_${userId}`;
+            sessionStorage.setItem(key, JSON.stringify(cartData));
+            console.log('[Storage] POS cart saved for user', userId);
+        } catch (error) {
+            console.error('Error saving POS cart:', error);
+        }
+    },
+
+    // Restore ongoing bill from sessionStorage
+    // Only restores cart if it belongs to the current user
+    loadPOSCart: (userId) => {
+        try {
+            const key = `pos_cart_data_${userId}`;
+            const cartData = sessionStorage.getItem(key);
+            if (cartData) {
+                const parsed = JSON.parse(cartData);
+                // Verify the cart belongs to this user (security check)
+                if (parsed.userId === userId) {
+                    console.log('[Storage] POS cart restored for user', userId, 'with', parsed.cart.length, 'items');
+                    return parsed;
+                } else {
+                    console.warn('[Storage] Cart user mismatch - clearing invalid cart');
+                    sessionStorage.removeItem(key);
+                    return null;
+                }
+            }
+            return null;
+        } catch (error) {
+            console.error('Error loading POS cart:', error);
+            return null;
+        }
+    },
+
+    // Clear saved cart data (after payment completed or logout)
+    clearPOSCart: (userId) => {
+        try {
+            const key = `pos_cart_data_${userId}`;
+            sessionStorage.removeItem(key);
+            console.log('[Storage] POS cart cleared for user', userId);
+        } catch (error) {
+            console.error('Error clearing POS cart:', error);
+        }
+    },
+
+    // Clear all carts on logout (security)
+    clearAllPOSCarts: () => {
+        try {
+            const keys = Object.keys(sessionStorage);
+            keys.forEach(key => {
+                if (key.startsWith('pos_cart_data_')) {
+                    sessionStorage.removeItem(key);
+                }
+            });
+            console.log('[Storage] All POS carts cleared on logout');
+        } catch (error) {
+            console.error('Error clearing all POS carts:', error);
         }
     }
 };
